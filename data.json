@@ -1,0 +1,12 @@
+{
+  "collapseOnEditorClick": true,
+  "collapseOnActiveLeafChange": true,
+  "collapseOnFileOpen": false,
+  "keepMode": "path-subtree",
+  "revealActiveFile": true,
+  "autoCollapseEnabled": true,
+  "inactivityMinutes": 5,
+  "exclusiveAccordionEnabled": true,
+  "debugLogging": false,
+  "debugBypass": false
+}
