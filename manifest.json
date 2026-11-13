@@ -3,7 +3,8 @@
   "name": "Folder Focus Collapse",
   "version": "1.4.0",
   "minAppVersion": "1.0.0",
-  "description": "Collapses file-explorer folders outside the active note's path when the note is activated.",
+  "description": "Collapse folders outside the active note's path, then position and highlight the active file with anchor-first scrolling.",
   "author": "lishuai",
+  "authorUrl": "https://github.com/lishuai1993",
   "isDesktopOnly": false
 }
