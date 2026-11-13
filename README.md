@@ -125,7 +125,7 @@ The original keys `autoCollapseEnabled`, `inactivityMinutes`, and `exclusiveAcco
 
 # 七、License
 
-MIT. This project is derived from [Auto Folder Collapse](obsidian://show-plugin?id=auto-folder-collapse) by Dario Casciato; see [LICENSE](LICENSE) for the attribution notice.
+MIT. This project is derived from [Auto Folder Collapse](obsidian://show-plugin?id=auto-folder-collapse) by Dario Casciato; see [LICENSE](LICENSE) for the license text and [NOTICE](NOTICE) for the attribution notice.
 
 ---
 
@@ -254,4 +254,4 @@ Folder Focus Collapse 让文件树始终围绕你正在编辑的那篇笔记。�
 
 # 七、许可证
 
-MIT。本项目派生自 Dario Casciato 的 [Auto Folder Collapse](obsidian://show-plugin?id=auto-folder-collapse)，完整署名见 [LICENSE](LICENSE)。
+MIT。本项目派生自 Dario Casciato 的 [Auto Folder Collapse](obsidian://show-plugin?id=auto-folder-collapse)，许可证正文见 [LICENSE](LICENSE)，完整署名见 [NOTICE](NOTICE)。
