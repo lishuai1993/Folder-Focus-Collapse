@@ -3,8 +3,8 @@ const { Plugin, PluginSettingTab, Setting, TFolder, Notice, apiVersion } = requi
 const DEFAULT_SETTINGS = {
   uiLanguage: 'auto',
   collapseOnEditorClick: true,
-  collapseOnActiveLeafChange: false,
-  collapseOnFileOpen: false,
+  collapseOnActiveLeafChange: true,
+  collapseOnFileOpen: true,
   keepMode: 'path',
   revealMode: 'anchor',
   revealCenterRatio: 40,
@@ -1109,8 +1109,8 @@ class FolderFocusCollapseSettingTab extends PluginSettingTab {
         'collapseOnFileOpen',
         t('打开文件时收拢', 'Collapse on file open'),
         t(
-          '通过快速切换、搜索或快捷键打开文件时也执行收拢。默认关闭，避免点击文件树时反复收拢。',
-          'Also collapses when a file opens via quick switcher, search, or hotkeys. Off by default to avoid churn when clicking files in the explorer.'
+          '通过快速切换、搜索或快捷键打开文件时也执行收拢，与其它两种触发默认同时开启。',
+          'Also collapses when a file opens via quick switcher, search, or hotkeys. Enabled by default together with the other two triggers.'
         )
       );
     });

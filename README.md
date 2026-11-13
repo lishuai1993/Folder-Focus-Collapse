@@ -1,5 +1,7 @@
 # Folder Focus Collapse
 
+[English](#english) | [中文说明](#中文说明)
+
 # English
 
 Folder Focus Collapse keeps the file explorer focused on the note you are working on. When a note is activated, folders outside its path collapse, the active row is brought into view at a stable position, and the row is highlighted so it can be found at a glance. It is a derivative of [Auto Folder Collapse](obsidian://show-plugin?id=auto-folder-collapse): the accordion and inactivity behaviour of the original plugin are preserved, while activation-driven focusing, anchoring, scrolling, highlighting, and bilingual settings are new work introduced by this plugin.
@@ -12,7 +14,7 @@ Three independent triggers decide when the tree collapses around the active note
 
 - **Click in the editor** — clicking into the note body or moving the caret focuses the tree on that note.
 - **Switch tabs** — the active leaf changing triggers the same collapse, including clicking a file in the explorer.
-- **Open a file** — quick switcher, search, and hotkeys can trigger it too. Both tab-switch and file-open triggers are off by default to avoid churn.
+- **Open a file** — quick switcher, search, and hotkeys can trigger it too. All three triggers are enabled by default and can be switched off independently.
 
 The scope of a collapse is controlled by the keep mode:
 
@@ -99,8 +101,8 @@ The original keys `autoCollapseEnabled`, `inactivityMinutes`, and `exclusiveAcco
 | :--- | :--- | :--- |
 | `uiLanguage` | `auto` | Settings language: follow Obsidian, Chinese, or English. |
 | `collapseOnEditorClick` | on | Collapse when clicking into the editor. |
-| `collapseOnActiveLeafChange` | off | Collapse when the active tab changes. |
-| `collapseOnFileOpen` | off | Collapse when a file opens through other routes. |
+| `collapseOnActiveLeafChange` | on | Collapse when the active tab changes. |
+| `collapseOnFileOpen` | on | Collapse when a file opens through other routes. |
 | `keepMode` | `path` | Which folders survive a collapse. |
 | `revealMode` | `anchor` | Anchor first / always center / only keep visible / no scrolling. |
 | `revealCenterRatio` | 40 | Height ratio used when centring (30–55). |
@@ -141,7 +143,7 @@ Folder Focus Collapse 让文件树始终围绕你正在编辑的那篇笔记。�
 
 - **点击正文**：点击正文或移动光标进入当前笔记时，文件树聚焦到该笔记所在路径。
 - **切换标签页**：活动标签页变化时同样收拢，点击文件树中的文件也会触发。
-- **打开文件**：快速切换、搜索、快捷键等打开文件的方式也可以触发。后两者默认关闭，避免频繁收拢。
+- **打开文件**：快速切换、搜索、快捷键等打开文件的方式也可以触发。三种触发默认全部开启，可分别关闭。
 
 收拢范围由「保持展开的目录」决定：
 
@@ -228,8 +230,8 @@ Folder Focus Collapse 让文件树始终围绕你正在编辑的那篇笔记。�
 | :--- | :--- | :--- |
 | `uiLanguage` | `auto` | 设置页语言：跟随 Obsidian、中文或英文。 |
 | `collapseOnEditorClick` | 开 | 点击正文时收拢。 |
-| `collapseOnActiveLeafChange` | 关 | 切换标签页时收拢。 |
-| `collapseOnFileOpen` | 关 | 通过其它方式打开文件时收拢。 |
+| `collapseOnActiveLeafChange` | 开 | 切换标签页时收拢。 |
+| `collapseOnFileOpen` | 开 | 通过其它方式打开文件时收拢。 |
 | `keepMode` | `path` | 收拢时保留哪些目录。 |
 | `revealMode` | `anchor` | 顶部锚定优先 / 始终居中 / 仅保证可见 / 不滚动。 |
 | `revealCenterRatio` | 40 | 居中时的行高比例（30–55）。 |

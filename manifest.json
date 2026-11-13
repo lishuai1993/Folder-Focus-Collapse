@@ -1,7 +1,7 @@
 {
   "id": "folder-focus-collapse",
   "name": "Folder Focus Collapse",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "minAppVersion": "1.0.0",
   "description": "Collapse folders outside the active note's path, then position and highlight the active file with anchor-first scrolling.",
   "author": "lishuai",
