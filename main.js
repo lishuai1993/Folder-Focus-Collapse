@@ -1,11 +1,14 @@
 const { Plugin, PluginSettingTab, Setting, TFolder, Notice, apiVersion } = require('obsidian');
 
 const DEFAULT_SETTINGS = {
+  uiLanguage: 'auto',
   collapseOnEditorClick: true,
   collapseOnActiveLeafChange: false,
   collapseOnFileOpen: false,
   keepMode: 'path',
-  revealActiveFile: true,
+  revealMode: 'anchor',
+  revealCenterRatio: 40,
+  activeFileHighlight: 'accent',
   autoCollapseEnabled: true,
   inactivityMinutes: 5,
   exclusiveAccordionEnabled: true,
@@ -14,6 +17,15 @@ const DEFAULT_SETTINGS = {
 };
 
 const KEEP_MODES = ['path', 'path-siblings', 'path-subtree'];
+// Legacy strategy list, kept only for migrating the old two-key settings.
+const REVEAL_STRATEGIES = ['anchor', 'center', 'nearest'];
+const REVEAL_MODES = ['off', 'anchor', 'center', 'nearest'];
+const HIGHLIGHT_MODES = ['accent', 'bar', 'off'];
+// Preferred vertical band for the active row, as a fraction of the explorer height.
+const REVEAL_BAND_TOP = 0.1;
+const REVEAL_BAND_BOTTOM = 0.78;
+const REVEAL_CORRECTION_MS = 250;
+const UI_LANGUAGES = ['auto', 'zh', 'en'];
 const ICON_SELECTORS = '.collapse-icon, .tree-item-collapse, [data-action="toggle-folder"]';
 const EXPLORER_SELECTORS = [
   '.nav-files-container.node-insert-event',
@@ -26,7 +38,14 @@ const MAX_DEBUG_ENTRIES = 50000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+let languageOverride = null;
+
+function setLanguageOverride(lang) {
+  languageOverride = lang === 'zh' || lang === 'en' ? lang : null;
+}
+
 function getLanguage() {
+  if (languageOverride) return languageOverride;
   try {
     const raw = window.localStorage.getItem('language') || '';
     return raw.toLowerCase().startsWith('zh') ? 'zh' : 'en';
@@ -36,6 +55,13 @@ function getLanguage() {
 }
 
 const t = (zh, en) => (getLanguage() === 'zh' ? zh : en);
+
+// Old settings split scrolling (boolean) from landing position (strategy).
+function legacyRevealMode(loaded) {
+  if (loaded && loaded.revealActiveFile === false) return 'off';
+  const strategy = loaded && loaded.revealStrategy;
+  return REVEAL_STRATEGIES.includes(strategy) ? strategy : 'anchor';
+}
 
 function parentFolder(path) {
   const index = path.lastIndexOf('/');
@@ -152,6 +178,7 @@ class DebugLog {
 class FolderFocusCollapsePlugin extends Plugin {
   async onload() {
     await this.loadSettings();
+    this.applyLanguage();
     this.addSettingTab(new FolderFocusCollapseSettingTab(this.app, this));
 
     this.applyQueued = false;
@@ -164,7 +191,9 @@ class FolderFocusCollapsePlugin extends Plugin {
     this.frameHandle = null;
     this.lastActiveFilePath = null;
     this.syncChecksLeft = 0;
+    this.revealGuard = null;
     this.debug = new DebugLog(this);
+    this.applyHighlightClass();
 
     // Obsidian has no public 'editor-click' event; catch the click on the editor DOM.
     this.registerDomEvent(
@@ -187,11 +216,13 @@ class FolderFocusCollapsePlugin extends Plugin {
       document,
       'scroll',
       (event) => {
-        if (!this.settings.debugLogging) return;
         const target = event.target;
         if (!(target instanceof Element)) return;
         if (!target.classList.contains('nav-files-container')) return;
-        this.debug.record('scroll', { top: Math.round(target.scrollTop) });
+        if (this.settings.debugLogging) {
+          this.debug.record('scroll', { top: Math.round(target.scrollTop) });
+        }
+        this.handleRevealScroll(target);
       },
       { capture: true }
     );
@@ -253,22 +284,62 @@ class FolderFocusCollapsePlugin extends Plugin {
   onunload() {
     this.applyQueued = false;
     this.pendingFile = null;
+    this.revealGuard = null;
     if (this.frameHandle) window.cancelAnimationFrame(this.frameHandle);
     this.frameHandle = null;
+    document.body.classList.remove('ffc-highlight-accent', 'ffc-highlight-bar');
+    setLanguageOverride(null);
     this.detachExplorerListeners();
     this.stopInactivityTimer();
   }
 
+  applyHighlightClass() {
+    const mode = HIGHLIGHT_MODES.includes(this.settings.activeFileHighlight)
+      ? this.settings.activeFileHighlight
+      : 'accent';
+    document.body.classList.toggle('ffc-highlight-accent', mode === 'accent');
+    document.body.classList.toggle('ffc-highlight-bar', mode === 'bar');
+  }
+
   async loadSettings() {
     const loaded = (await this.loadData()) || {};
+    const hasLegacyKeys =
+      Object.prototype.hasOwnProperty.call(loaded, 'revealActiveFile') ||
+      Object.prototype.hasOwnProperty.call(loaded, 'revealStrategy');
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
     if (!KEEP_MODES.includes(this.settings.keepMode)) {
       this.settings.keepMode = DEFAULT_SETTINGS.keepMode;
     }
+    if (!REVEAL_MODES.includes(loaded.revealMode)) {
+      this.settings.revealMode = hasLegacyKeys ? legacyRevealMode(loaded) : DEFAULT_SETTINGS.revealMode;
+    }
+    delete this.settings.revealActiveFile;
+    delete this.settings.revealStrategy;
+    if (!HIGHLIGHT_MODES.includes(this.settings.activeFileHighlight)) {
+      this.settings.activeFileHighlight = DEFAULT_SETTINGS.activeFileHighlight;
+    }
+    const ratio = Number(this.settings.revealCenterRatio);
+    this.settings.revealCenterRatio = Number.isFinite(ratio)
+      ? Math.min(55, Math.max(30, ratio))
+      : DEFAULT_SETTINGS.revealCenterRatio;
+    if (!UI_LANGUAGES.includes(this.settings.uiLanguage)) {
+      this.settings.uiLanguage = DEFAULT_SETTINGS.uiLanguage;
+    }
+    // Persist the migration so later loads no longer see the legacy keys.
+    if (hasLegacyKeys) await this.saveData(this.settings);
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  applyLanguage() {
+    const value = this.settings.uiLanguage;
+    setLanguageOverride(value === 'zh' || value === 'en' ? value : null);
+  }
+
+  effectiveLanguage() {
+    return getLanguage();
   }
 
   fileForEditorTarget(target) {
@@ -317,9 +388,12 @@ class FolderFocusCollapsePlugin extends Plugin {
       suppressMs: 300,
     });
 
+    const wantsReveal = this.settings.revealMode !== 'off';
     for (const leaf of leaves) {
       const view = leaf.view;
       if (!view || !view.containerEl) continue;
+      // Anchor position must be captured before the tree changes height.
+      const revealContext = wantsReveal ? this.captureRevealContext(view, file) : null;
       try {
         const items = view.fileItems;
         this.debug.record('apply.view', {
@@ -331,7 +405,7 @@ class FolderFocusCollapsePlugin extends Plugin {
         } else {
           this.applyWithDom(view, file, ancestors, ancestorSet);
         }
-        if (this.settings.revealActiveFile) this.revealFile(view, file);
+        if (wantsReveal) this.revealFile(view, file, revealContext);
       } catch (error) {
         this.debug.record('apply.error', { message: String(error) });
         console.error('[folder-focus-collapse] failed to update file explorer', error);
@@ -454,18 +528,233 @@ class FolderFocusCollapsePlugin extends Plugin {
     return false;
   }
 
-  revealFile(view, file) {
-    const item = view.fileItems && view.fileItems[file.path];
-    const el = (item && item.selfEl) || this.findFileEl(view, file.path);
-    if (!el || typeof el.scrollIntoView !== 'function') {
-      this.debug.record('reveal.skip', { file: file.path });
+  // Anchor position must be captured before the tree changes height, otherwise
+  // the browser's own scroll anchoring hides how far the top folder moved.
+  captureRevealContext(view, file) {
+    if (this.settings.revealMode === 'nearest') return null;
+    const container = this.getViewNavContainer(view);
+    if (!container) return null;
+    const anchorEl = this.findAnchorEl(view, file.path);
+    if (!anchorEl) return { container, anchorEl: null, anchorScreenY: null };
+    const containerRect = container.getBoundingClientRect();
+    const anchorScreenY = anchorEl.getBoundingClientRect().top - containerRect.top;
+    const visible = anchorScreenY >= -1 && anchorScreenY <= container.clientHeight - 20;
+    return { container, anchorEl, anchorScreenY: visible ? anchorScreenY : null };
+  }
+
+  getViewNavContainer(view) {
+    const root = view && view.containerEl;
+    if (root) {
+      if (root.classList && root.classList.contains('nav-files-container')) return root;
+      const nested = root.querySelector('.nav-files-container');
+      if (nested) return nested;
+    }
+    return this.getNavContainer();
+  }
+
+  findAnchorEl(view, path) {
+    const index = path.indexOf('/');
+    if (index < 0) return null;
+    return this.findFolderEl(view, path.slice(0, index));
+  }
+
+  revealFile(view, file, context) {
+    const container = (context && context.container) || this.getViewNavContainer(view);
+    if (!container) {
+      this.debug.record('reveal.skip', { file: file.path, reason: 'no container' });
       return;
     }
-    const container = this.getNavContainer();
-    const before = container ? Math.round(container.scrollTop) : null;
-    el.scrollIntoView({ block: 'nearest' });
-    const after = container ? Math.round(container.scrollTop) : null;
-    this.debug.record('reveal', { before, after, changed: before !== after });
+    const item = view.fileItems && view.fileItems[file.path];
+    const findEl = () =>
+      (item && item.selfEl) ||
+      this.findFileEl(view, file.path) ||
+      this.findFileElIn(container, file.path);
+    this.scheduleReveal(view, file, container, findEl, context, 0);
+  }
+
+  // Runs in rAF: expanded folders mount their rows one frame after setCollapsed.
+  scheduleReveal(view, file, container, findEl, context, attempt) {
+    window.requestAnimationFrame(() => {
+      if (!container.isConnected) return;
+      const el = findEl();
+      if (!el) {
+        if (attempt < 2) {
+          this.debug.record('reveal.deferred', { file: file.path, attempt: attempt + 1 });
+          this.scheduleReveal(view, file, container, findEl, context, attempt + 1);
+          return;
+        }
+        this.debug.record('reveal.skip', { file: file.path, reason: 'row not mounted' });
+        return;
+      }
+      this.applyReveal(view, file, container, el, context);
+    });
+  }
+
+  applyReveal(view, file, container, el, context) {
+    if (!container.isConnected || !el.isConnected) {
+      this.debug.record('reveal.skip', { file: file.path, reason: 'detached' });
+      return;
+    }
+    const mode = REVEAL_MODES.includes(this.settings.revealMode)
+      ? this.settings.revealMode
+      : 'anchor';
+    if (mode === 'off') return;
+    const before = Math.round(container.scrollTop);
+
+    if (mode === 'nearest') {
+      el.scrollIntoView({ block: 'nearest' });
+      this.debug.record('reveal', {
+        before,
+        after: Math.round(container.scrollTop),
+        mode,
+      });
+      return;
+    }
+
+    const height = container.clientHeight;
+    if (height <= 0 || container.scrollHeight <= height + 1) {
+      this.debug.record('reveal.noop', { file: file.path, reason: 'not scrollable' });
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const fileRect = el.getBoundingClientRect();
+    const fileTop = fileRect.top - containerRect.top + container.scrollTop;
+    const fileBottom = fileRect.bottom - containerRect.top + container.scrollTop;
+    const anchorEl =
+      context && context.anchorEl && context.anchorEl.isConnected
+        ? context.anchorEl
+        : this.findAnchorEl(view, file.path);
+    const anchorTop = anchorEl
+      ? anchorEl.getBoundingClientRect().top - containerRect.top + container.scrollTop
+      : null;
+    const anchorScreenY = context ? context.anchorScreenY : null;
+
+    const plan = this.computeRevealTarget({
+      mode,
+      ratio: Math.min(55, Math.max(30, Number(this.settings.revealCenterRatio) || 40)) / 100,
+      height,
+      currentTop: container.scrollTop,
+      maxScroll: Math.max(0, container.scrollHeight - height),
+      fileTop,
+      fileBottom,
+      anchorTop,
+      anchorScreenY,
+    });
+
+    this.debug.record('reveal.plan', {
+      file: file.path,
+      mode,
+      planMode: plan.mode,
+      anchorScreenY: anchorScreenY == null ? null : Math.round(anchorScreenY),
+      target: Math.round(plan.target),
+    });
+
+    const moved = Math.abs(plan.target - container.scrollTop) >= 1;
+    if (moved) this.setContainerScroll(container, plan.target);
+    this.armRevealGuard(container, el, plan.target);
+    this.debug.record('reveal.apply', {
+      before,
+      after: Math.round(container.scrollTop),
+      mode: plan.mode,
+      moved,
+    });
+  }
+
+  computeRevealTarget(geo) {
+    const bandTop = geo.height * REVEAL_BAND_TOP;
+    const bandBottom = geo.height * REVEAL_BAND_BOTTOM;
+    const clamp = (value) => Math.min(Math.max(value, 0), geo.maxScroll);
+    const centered = clamp(geo.fileTop - geo.ratio * geo.height);
+    const screenTop = geo.fileTop - geo.currentTop;
+    const screenBottom = geo.fileBottom - geo.currentTop;
+
+    if (geo.mode === 'center') return { target: centered, mode: 'center' };
+
+    // Without a visible top-level anchor there is nothing to hold in place.
+    if (geo.anchorTop == null || geo.anchorScreenY == null) {
+      const comfortable = screenTop >= 0 && screenBottom <= bandBottom;
+      return comfortable
+        ? { target: geo.currentTop, mode: 'hold' }
+        : { target: centered, mode: 'center' };
+    }
+
+    const anchorTarget = clamp(geo.anchorTop - geo.anchorScreenY);
+    const anchoredScreenTop = geo.fileTop - anchorTarget;
+    const anchoredScreenBottom = geo.fileBottom - anchorTarget;
+
+    if (anchoredScreenTop >= 0 && anchoredScreenBottom <= bandBottom) {
+      return { target: anchorTarget, mode: 'anchor' };
+    }
+
+    if (anchoredScreenBottom > bandBottom) {
+      const minimal = geo.fileBottom - bandBottom;
+      // The anchor stays on screen as long as the needed scroll does not pass it.
+      if (minimal <= geo.anchorTop) {
+        return { target: clamp(Math.max(minimal, anchorTarget)), mode: 'anchor-limited' };
+      }
+      return { target: centered, mode: 'center' };
+    }
+
+    return {
+      target: clamp(Math.min(anchorTarget, geo.fileTop - bandTop)),
+      mode: 'anchor-up',
+    };
+  }
+
+  armRevealGuard(container, fileEl, target) {
+    this.revealGuard = {
+      container,
+      fileEl,
+      target,
+      until: performance.now() + REVEAL_CORRECTION_MS,
+      corrected: false,
+    };
+  }
+
+  // The native auto-reveal may scroll after ours; correct it once, and only when
+  // the row left the comfortable band.
+  handleRevealScroll(container) {
+    const guard = this.revealGuard;
+    if (!guard) return;
+    if (performance.now() > guard.until) {
+      this.revealGuard = null;
+      return;
+    }
+    if (guard.container !== container || guard.corrected) return;
+    if (!guard.fileEl.isConnected) {
+      this.revealGuard = null;
+      return;
+    }
+    if (Math.abs(container.scrollTop - guard.target) < 2) return;
+    if (this.isFileComfortable(container, guard.fileEl)) {
+      this.revealGuard = null;
+      return;
+    }
+    const actual = Math.round(container.scrollTop);
+    guard.corrected = true;
+    this.setContainerScroll(container, guard.target);
+    this.debug.record('reveal.corrected', {
+      actual,
+      target: Math.round(guard.target),
+    });
+  }
+
+  isFileComfortable(container, fileEl) {
+    if (!fileEl.isConnected) return true;
+    const containerRect = container.getBoundingClientRect();
+    const rect = fileEl.getBoundingClientRect();
+    const top = rect.top - containerRect.top;
+    const bottom = rect.bottom - containerRect.top;
+    return top >= 0 && bottom <= container.clientHeight * REVEAL_BAND_BOTTOM;
+  }
+
+  setContainerScroll(container, top) {
+    const previous = container.style.scrollBehavior;
+    container.style.scrollBehavior = 'auto';
+    container.scrollTop = top;
+    if (previous) container.style.scrollBehavior = previous;
+    else container.style.removeProperty('scroll-behavior');
   }
 
   getNavContainer() {
@@ -794,6 +1083,8 @@ class FolderFocusCollapseSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass('ffc-settings');
 
+    this.addLanguageRow(containerEl);
+
     this.addSection(containerEl, t('触发时机', 'Triggers'), (group) => {
       this.addToggle(
         group,
@@ -825,33 +1116,117 @@ class FolderFocusCollapseSettingTab extends PluginSettingTab {
     });
 
     this.addSection(containerEl, t('折叠范围', 'Collapse scope'), (group) => {
+      const keepSetting = new Setting(group).setName(
+        t('保持展开的目录', 'Folders to keep open')
+      );
+      this.setListDescription(
+        keepSetting,
+        t(
+          '收拢时哪些文件夹不被折叠。三种模式都不会主动展开任何目录，只决定保留范围。以 工作管理/技术沉淀/深度学习框架/笔记.md 为例：',
+          'Which folders survive a collapse. None of the three modes opens folders on its own; they only define what stays open. For 工作管理/技术沉淀/深度学习框架/note.md:'
+        ),
+        [
+          t(
+            '仅当前文件路径：只保留三层祖先目录，其它全部折叠。',
+            'Path only: keeps the three ancestor folders and collapses everything else.'
+          ),
+          t(
+            '路径 + 同级目录：额外保留「深度学习框架」下的直接子文件夹，其内部更深的目录仍会折叠。',
+            'Path + sibling folders: also keeps the direct subfolders of 深度学习框架; deeper folders inside them still collapse.'
+          ),
+          t(
+            '路径 + 当前目录整层：「深度学习框架」整棵子树保持原样，只折叠其外部目录。',
+            'Path + current folder subtree: leaves the entire 深度学习框架 subtree untouched and collapses only folders outside it.'
+          ),
+        ],
+        t(
+          '文件位于库根目录时，整层模式会保留整棵树。',
+          'When the note sits at the vault root, the subtree mode keeps the whole tree.'
+        )
+      );
+      keepSetting.addDropdown((dropdown) => {
+        dropdown.addOption('path', t('仅当前文件路径', 'Active file path only'));
+        dropdown.addOption('path-siblings', t('路径 + 同级目录', 'Path + sibling folders'));
+        dropdown.addOption('path-subtree', t('路径 + 当前目录整层', 'Path + current folder subtree'));
+        dropdown.setValue(this.plugin.settings.keepMode).onChange(async (value) => {
+          this.plugin.settings.keepMode = value;
+          await this.plugin.saveSettings();
+        });
+      });
+    });
+
+    this.addSection(containerEl, t('文件滚动与高亮', 'File scrolling and highlight'), (group) => {
+      const revealMode = this.plugin.settings.revealMode;
+      // Declared before the rows so the dropdown can update the center row
+      // in place, without re-rendering the settings tab.
+      let applyCenterRowState = null;
+
       new Setting(group)
-        .setName(t('保持展开的目录', 'Folders to keep open'))
+        .setName(t('当前文件滚动方式', 'Active file scroll mode'))
         .setDesc(
           t(
-            '仅当前文件路径：只展开该文件的祖先目录。路径 + 同级目录：保留当前目录下的兄弟文件夹。路径 + 当前目录整层：当前目录整棵子树保持原状。',
-            "Active file path only: expand just the note's ancestor folders. Path + sibling folders: keep the folders beside the note. Path + current folder subtree: leave the note's whole folder untouched."
+            '决定收拢后文件树如何把当前文件带进视野。顶部锚定优先：锁住顶层目录的位置，只在当前文件会掉出中部时让步；始终居中：每次都把当前文件放到固定高度；仅保证可见：只在完全不可见时贴近边缘；不滚动：只收拢，不改变滚动位置。',
+            'How the explorer brings the active file into view after collapsing. Anchor first: holds the top-level folder in place and concedes only when the note would leave the middle band; always center: places the note at the fixed height every time; only keep visible: scrolls just enough to make the note visible; no scrolling: collapses only and never moves the scroll position.'
           )
         )
         .addDropdown((dropdown) => {
-          dropdown.addOption('path', t('仅当前文件路径', 'Active file path only'));
-          dropdown.addOption('path-siblings', t('路径 + 同级目录', 'Path + sibling folders'));
-          dropdown.addOption('path-subtree', t('路径 + 当前目录整层', 'Path + current folder subtree'));
-          dropdown.setValue(this.plugin.settings.keepMode).onChange(async (value) => {
-            this.plugin.settings.keepMode = value;
+          dropdown.addOption('anchor', t('顶部锚定优先', 'Anchor first'));
+          dropdown.addOption('center', t('始终居中', 'Always center'));
+          dropdown.addOption('nearest', t('仅保证可见', 'Only keep visible'));
+          dropdown.addOption('off', t('不滚动（只收拢）', 'No scrolling (collapse only)'));
+          dropdown.setValue(revealMode).onChange(async (value) => {
+            this.plugin.settings.revealMode = value;
+            if (applyCenterRowState) applyCenterRowState(value);
             await this.plugin.saveSettings();
           });
         });
 
-      this.addToggle(
-        group,
-        'revealActiveFile',
-        t('折叠后定位当前文件', 'Reveal active file after collapse'),
-        t(
-          '收拢后确保当前文件所在行留在文件树可视区内。',
-          'Keeps the active note visible in the file explorer after collapsing.'
+      const centerRow = new Setting(group)
+        .setName(t('居中位置', 'Center position'))
+        .setDesc(
+          t(
+            '当前文件行上边缘在文件树容器高度中的位置比例。40% 表示大约停在距顶部四成处（容器高 600px 时约 240px），即中部偏上。仅在「始终居中」，或「顶部锚定优先」因祖先链过长而转为居中时生效；文件能在顶层目录不动的前提下完整显示时，此项不生效。比例越小文件越靠上，越大越靠下。当前滚动方式为「仅保证可见」或「不滚动」时，此行置灰不可操作。',
+            "Where the active row's top edge sits inside the explorer, as a share of its height. 40% places it about four tenths from the top (roughly 240px in a 600px pane), slightly above the middle. It applies only with \"Always center\", or when \"Anchor first\" falls back to centering because the ancestor chain is too long; it has no effect when the note fits while the top-level folder stays put. A smaller value moves the row up, a larger one down. This row is greyed out when the scroll mode is \"Only keep visible\" or \"No scrolling\"."
+          )
+        );
+      let centerSlider = null;
+      centerRow.addSlider((slider) => {
+        centerSlider = slider;
+        slider
+          .setLimits(30, 55, 5)
+          .setValue(this.plugin.settings.revealCenterRatio)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.revealCenterRatio = value;
+            await this.plugin.saveSettings();
+          });
+      });
+      applyCenterRowState = (mode) => {
+        const enabled = mode === 'anchor' || mode === 'center';
+        centerRow.setDisabled(!enabled);
+        centerRow.settingEl.classList.toggle('ffc-row-disabled', !enabled);
+        if (centerSlider) centerSlider.setDisabled(!enabled);
+      };
+      applyCenterRowState(revealMode);
+
+      new Setting(group)
+        .setName(t('当前文件高亮', 'Active file highlight'))
+        .setDesc(
+          t(
+            '强调色底：用主题强调色铺满当前文件行；左侧强调条：保留底色并加定位竖条；保持主题：不改动原生外观。',
+            'Accent fill: paints the active row with the theme accent; left bar: keeps the theme background and adds a marker; theme: leaves the native look untouched.'
+          )
         )
-      );
+        .addDropdown((dropdown) => {
+          dropdown.addOption('accent', t('强调色底', 'Accent fill'));
+          dropdown.addOption('bar', t('左侧强调条', 'Left bar'));
+          dropdown.addOption('off', t('保持主题', 'Theme default'));
+          dropdown.setValue(this.plugin.settings.activeFileHighlight).onChange(async (value) => {
+            this.plugin.settings.activeFileHighlight = value;
+            await this.plugin.saveSettings();
+            this.plugin.applyHighlightClass();
+          });
+        });
     });
 
     this.addSection(containerEl, t('文件树交互', 'File explorer interaction'), (group) => {
@@ -961,6 +1336,54 @@ class FolderFocusCollapseSettingTab extends PluginSettingTab {
     this.reflowDescriptions();
   }
 
+  addLanguageRow(containerEl) {
+    const current = this.plugin.settings.uiLanguage;
+    const effective = this.plugin.effectiveLanguage();
+    const effectiveName = effective === 'zh' ? '中文' : 'English';
+    const row = new Setting(containerEl)
+      .setName(t('界面语言', 'Interface language'))
+      .setDesc(
+        current === 'auto'
+          ? t(
+              `仅影响本插件的设置页与提示文字，不改变 Obsidian 界面语言。当前跟随 Obsidian（${effectiveName}）。`,
+              `Affects only this plugin's settings and notices, not the Obsidian UI language. Currently following Obsidian (${effectiveName}).`
+            )
+          : t(
+              '仅影响本插件的设置页与提示文字，不改变 Obsidian 界面语言。',
+              "Affects only this plugin's settings and notices, not the Obsidian UI language."
+            )
+      );
+
+    const addLanguageButton = (label, value) => {
+      row.addButton((button) => {
+        button.setButtonText(label);
+        button.buttonEl.addClass('ffc-setting-btn');
+        if (current === value) {
+          button.setCta();
+          button.buttonEl.addClass('ffc-btn-active');
+        }
+        button.onClick(async () => {
+          this.plugin.settings.uiLanguage = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyLanguage();
+          this.display();
+        });
+      });
+    };
+    addLanguageButton('中文', 'zh');
+    addLanguageButton('English', 'en');
+  }
+
+  setListDescription(setting, lead, lines, tail) {
+    setting.setDesc(lead);
+    const descEl =
+      setting.descEl || setting.settingEl.querySelector('.setting-item-description');
+    if (!descEl) return;
+    const list = descEl.createEl('ul', { cls: 'ffc-desc-list' });
+    for (const line of lines) list.createEl('li', { text: line });
+    if (tail) descEl.createEl('div', { text: tail, cls: 'ffc-desc-tail' });
+  }
+
   addSection(root, heading, build) {
     new Setting(root).setName(heading).setHeading();
     const group = root.createDiv({ cls: 'ffc-settings-group' });
@@ -991,6 +1414,8 @@ class FolderFocusCollapseSettingTab extends PluginSettingTab {
   resetAllSettings(button) {
     this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
     this.plugin.saveSettings();
+    this.plugin.applyLanguage();
+    this.plugin.applyHighlightClass();
     if (this.plugin.settings.autoCollapseEnabled) this.plugin.startInactivityTimer();
     else this.plugin.stopInactivityTimer();
     this.plugin.debug.clear();

@@ -13,6 +13,28 @@
   padding-left: 16px;
 }
 
+.ffc-settings .ffc-desc-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.ffc-settings .ffc-desc-list li {
+  margin: 2px 0;
+}
+
+.ffc-settings .ffc-desc-tail {
+  margin-top: 4px;
+}
+
+.ffc-settings .setting-item.ffc-row-disabled {
+  opacity: 0.45;
+}
+
+.ffc-settings .setting-item.ffc-row-disabled .setting-item-control {
+  pointer-events: none;
+}
+
 .ffc-settings .setting-item.ffc-row-sep-above {
   margin-top: 12px;
   padding-top: 12px;
@@ -37,4 +59,33 @@
 .ffc-settings .ffc-setting-btn.ffc-setting-btn:not(:focus-visible).ffc-btn-pressed {
   transform: scale(0.96);
   box-shadow: inset 0 0 0 1px var(--color-green);
+}
+
+.ffc-settings .ffc-setting-btn.ffc-setting-btn.ffc-btn-active {
+  background-color: var(--color-btn-primary-bg, var(--interactive-accent));
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+body.ffc-highlight-accent .nav-files-container .nav-file-title.is-active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-s);
+  font-weight: 600;
+}
+
+body.ffc-highlight-accent .nav-files-container .nav-file-title.is-active:hover,
+body.ffc-highlight-accent .nav-files-container .nav-file-title.is-active:focus-visible {
+  background-color: var(--interactive-accent-hover);
+  color: var(--text-on-accent);
+}
+
+body.ffc-highlight-accent .nav-files-container .nav-file-title.is-active .nav-file-tag {
+  color: var(--text-on-accent);
+}
+
+body.ffc-highlight-bar .nav-files-container .nav-file-title.is-active {
+  box-shadow: inset 3px 0 0 var(--interactive-accent);
+  background-color: var(--background-modifier-hover);
+  font-weight: 600;
 }

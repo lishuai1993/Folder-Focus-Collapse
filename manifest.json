@@ -1,7 +1,7 @@
 {
   "id": "folder-focus-collapse",
   "name": "Folder Focus Collapse",
-  "version": "1.2.1",
+  "version": "1.4.0",
   "minAppVersion": "1.0.0",
   "description": "Collapses file-explorer folders outside the active note's path when the note is activated.",
   "author": "lishuai",
